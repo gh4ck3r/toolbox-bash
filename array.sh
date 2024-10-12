@@ -1,5 +1,10 @@
 #!/bin/bash
 
+function isarray
+{
+  [[ $(declare -p $1 2>/dev/null) = "declare -a"* ]]
+}
+
 function arr-dump
 {
   : ${1?name of array}
@@ -13,7 +18,7 @@ function arr-dump
 function arr-sort
 {
   : ${1?name of array}
-  [[ $(declare -p $1 2>/dev/null) = "declare -a"* ]] || return 22
+  isarray $1 || return 22
   declare -n var=$1
 
   local _IFS=$IFS
