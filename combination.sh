@@ -16,9 +16,26 @@ function combo-invoker
   done
 }
 
+function combo-env-invoker
+{
+  if [[ $# == 1 ]]; then $1; return; fi
+
+  local -r var=$1
+  local -rn arr=$1
+  shift;
+
+  local val
+  for val in ${arr[@]:-""}; do
+    [[ -n $val ]] && local $var=$val
+    $FUNCNAME $@
+  done
+}
+
 # "sourced script" ends here
 return 0 2>/dev/null
 
+########################################
+false && ( # test combo-invoker {{{
 function handler
 {
   echo -n "$FUNCNAME: # args: $# --> "
@@ -33,3 +50,29 @@ function handler
 
 declare -a args=(a b c "1 2")
 combo-invoker handler "${args[@]}"
+) # }}}
+########################################
+
+########################################
+false && ( # test combo-env-invoker {{{
+declare -a ARGS=(
+  FOO
+  BAR
+  BAZ
+)
+
+function env-dump
+{
+  for name in ${ARGS[@]}; do
+    local -n var=$name
+    echo -n "$name: ${var}, "
+  done
+  echo
+}
+
+declare -a FOO=(a b)
+declare -a BAR=(1 2)
+declare -a BAZ=(A B)
+combo-env-invoker ${ARGS[@]} env-dump
+) # }}}
+########################################
