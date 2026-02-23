@@ -1,14 +1,16 @@
 #!/bin/bash
 #
 # NAME:
-#    parseargs.sh
+#    parseargs.sh - argument parser as described in preamble
 #
 # SYNOPSIS:
 #    source parseargs.sh
+#    local -a ARGV;local -A ARGO; parseargs "$@"
 #
 # DESCRIPTION:
-#    source this file and use parseargs() function while variable ARGV is defined
-#    as associative array. It'll be filled with parsed arguments.
+#    source this file and use parseargs() function while variables ARGV and ARVO
+#    are defined as indexed and associative array respectively. The function
+#    will fill the variables with positional arguments and parsed options.
 #
 # DEPENDENCIES:
 #    awk(1) - pattern scanning and processing language
@@ -18,7 +20,8 @@
 #    In bash script following parse arguments and options as described its
 #    preamble comment section.
 #       source parseargs.sh
-#       declare -A ARGV
+#       declare -a ARGV
+#       declare -A ARGO
 #       parseargs "$@"
 #    It can also be used for function, check function foo.bar defined below of
 #    this script for more detail.
@@ -29,19 +32,19 @@
 function parseargs {
   err() { echo -e "\e[0;31m" "$@" "\e[0m" >&2; }
 
-  if [[ ${ARGV@a} != *A* ]]; then
+  if [[ ${ARGV@a} != *a* ]] || [[ ${ARGO@a} != *A* ]]; then
     local cmd; read _ cmd _ <<<$(caller 0)
-    err "$cmd: variable ARGV should be defined as associative array"
+    err "$cmd: variable ARGV and ARGO should be defined as indexed and associative array"
     return 22
   fi
-  set -u
-  trap 'set +u' RETURN
+  local old_opts=$(set +o | grep nounset); set -u; trap '$old_opts' RETURN
 
   read _ ARGV[0] _ <<<$(caller 0)
   local line file
   if [[ ${ARGV[0]} == main ]]; then
     file=${BASH_SOURCE[1]}
-    line=$(awk '/^\s*#/ {next} {exit} END{print NR}' $file)
+    line=$(awk '/^\s*#/ {next} {exit} END{print NR}' "$file")
+    ARGV[0]=${file##*/}
   else
     read _ line file <<<$(shopt -s extdebug; declare -F ${ARGV[0]})
   fi
@@ -57,7 +60,7 @@ function parseargs {
         printf "%s%s%s,", m[1], (m[3] ? ":" : ""), m[3]
         found=1
       }
-      match($0, /\s*--(\w{2,})(|=(\w+))\>/, m) {
+      match($0, /\s*--(\w{2,})(|[= ](\w+))\>/, m) {
         printf "%s%s%s,", m[1], (m[3] ? ":" : ""), m[3]
         found=1
       }
@@ -95,21 +98,21 @@ function parseargs {
     fi
   done <<<"${option_string}"
 
-  soptions=${soptions%,}
-  loptions=${loptions%,}
-  eval set -- "$(getopt --name "${ARGV[0]}" \
-    --longoptions "${loptions}" \
-    --options "${soptions}" \
-    -- "$@")"
+  local opt=$(getopt --name "${ARGV[0]}" \
+    --longoptions "${loptions%,}" \
+    --options "${soptions%,}" \
+    -- "$@")
+  [[ $? != 0 ]] && return 1
+  eval set -- "$opt"
 
   while :; do
     if [[ $1 == -- ]]; then
       shift; break;
     elif [[ -v OPTKEYS[$1:] ]]; then
-      ARGV[${OPTKEYS[$1:]}]=$2;
+      ARGO[${OPTKEYS[$1:]}]=$2;
       shift;
     elif [[ -v OPTKEYS[$1] ]]; then
-      ARGV[${OPTKEYS[$1]}]=set;
+      ARGO[${OPTKEYS[$1]}]=set;
     else
       err "${ARGV[0]}: unhandled option: '$1'"
     fi
@@ -148,7 +151,7 @@ function error() { echo -e "\e[0;31m" "$@" "\e[0m" >&2; }
 #  -x should be excluded from option processing
 #  --XX should be excluded too
 function foo.bar {
-  local -A ARGV; parseargs "$@"
+  local -a ARGV;local -A ARGO; parseargs "$@"
 
   set -e
   [[ ${ARGV[0]} == $FUNCNAME ]]
@@ -156,11 +159,11 @@ function foo.bar {
   [[ ${ARGV[2]} == arg2 ]]
   [[ ${ARGV[3]} == arg3 ]]
 
-  [[ ${ARGV[AVAL]} == hello2 ]]
-  [[ ${ARGV[BVAL]} == world ]]
-  [[ -v ARGV[optc] ]]
-  [[ ${ARGV[DVAL]} == delta ]]
-  [[ -v ARGV[long] ]]
+  [[ ${ARGO[AVAL]} == hello2 ]]
+  [[ ${ARGO[BVAL]} == world ]]
+  [[ -v ARGO[optc] ]]
+  [[ ${ARGO[DVAL]} == delta ]]
+  [[ -v ARGO[long] ]]
   set +e
   echo "foo.bar() test PASS"
 }
