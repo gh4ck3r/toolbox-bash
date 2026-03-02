@@ -32,24 +32,34 @@
 function parseargs {
   err() { echo -e "\e[0;31m" "$@" "\e[0m" >&2; }
 
+  local cmd;
+  read -r _ cmd _ <<<"$(caller 0)"
+  local -r cmd
+
   if [[ ${ARGV@a} != *a* ]] || [[ ${ARGO@a} != *A* ]]; then
-    local cmd; read _ cmd _ <<<$(caller 0)
-    err "$cmd: variable ARGV and ARGO should be defined as indexed and associative array"
+    if [[ $cmd = main ]]; then
+      err "$cmd: variable ARGV and ARGO should be defined as indexed and associative array"
+    else
+      err "${BASH_SOURCE[1]##*/}: variable ARGV and ARGO should be defined as indexed and associative array"
+    fi
     return 22
   fi
-  local old_opts=$(set +o | grep nounset); set -u; trap '$old_opts' RETURN
 
-  read _ ARGV[0] _ <<<$(caller 0)
+  local old_opts;
+  old_opts=$(set +o | grep nounset); set -u; trap '$old_opts' RETURN
+
   local line file
-  if [[ ${ARGV[0]} == main ]]; then
+  if [[ $cmd == main ]]; then
     file=${BASH_SOURCE[1]}
     line=$(awk '/^\s*#/ {next} {exit} END{print NR}' "$file")
     ARGV[0]=${file##*/}
   else
-    read _ line file <<<$(shopt -s extdebug; declare -F ${ARGV[0]})
+    read -r _ line file <<<"$(shopt -s extdebug; declare -F "$cmd")"
+    ARGV[0]=$cmd
   fi
 
-  local option_string=$(head -n $((line-1)) "$file" |
+  local option_string;
+  option_string=$(head -n $((line-1)) "$file" |
     tac | awk '
       $1 ~ /^#/ && $2 ~ /^O(ptions?|PTIONS?):?/ {print; exit}
       !NF || $1 != "#" {exit}
@@ -68,9 +78,9 @@ function parseargs {
 
   local -A OPTKEYS;
   local option soptions="" loptions=""
-  while read -d, option; do
+  while read -rd, option; do
     local opt val
-    IFS=: read opt val <<<${option}
+    IFS=: read -r opt val <<<"${option}"
     if ((${#opt}==1)); then
       soptions+=${opt}${val:+:},
       if [[ -v OPTKEYS[-${opt}${val:+:}] ]]; then
@@ -89,20 +99,21 @@ function parseargs {
       fi
     fi
   done <<<"${option_string}"
-  while read option; do
+  while read -r option; do
     if [[ $option = ?,*, ]]; then
       local s l
       # parse same short/long option "c,optc,"
-      IFS=, read s l <<<${option}
+      IFS=, read -r s l <<<"${option}"
       OPTKEYS[-$s]=${OPTKEYS[--$l]}
     fi
   done <<<"${option_string}"
 
-  local opt=$(getopt --name "${ARGV[0]}" \
+  local opt
+  if ! opt=$(getopt --name "${ARGV[0]}" \
     --longoptions "${loptions%,}" \
     --options "${soptions%,}" \
-    -- "$@")
-  [[ $? != 0 ]] && return 1
+    -- "$@"); then return 1
+  fi
   eval set -- "$opt"
 
   while :; do
@@ -112,16 +123,16 @@ function parseargs {
       ARGO[${OPTKEYS[$1:]}]=$2;
       shift;
     elif [[ -v OPTKEYS[$1] ]]; then
-      ARGO[${OPTKEYS[$1]}]=set;
+      ARGO[${OPTKEYS[$1]}]="set";
     else
       err "${ARGV[0]}: unhandled option: '$1'"
     fi
     shift;
   done
 
-  let i=1;
+  local -i i
   for ((i=1;i<=$#;++i)); do
-    ARGV[$i]=${!i}
+    ARGV["$i"]=${!i}
   done
 }
 
@@ -154,7 +165,7 @@ function foo.bar {
   local -a ARGV;local -A ARGO; parseargs "$@"
 
   set -e
-  [[ ${ARGV[0]} == $FUNCNAME ]]
+  [[ ${ARGV[0]} == "${FUNCNAME[0]}" ]]
   [[ ${ARGV[1]} == "Hello world" ]]
   [[ ${ARGV[2]} == arg2 ]]
   [[ ${ARGV[3]} == arg3 ]]
