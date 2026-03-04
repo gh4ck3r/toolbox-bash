@@ -4,54 +4,76 @@
 #    parseargs.sh - argument parser as described in preamble
 #
 # SYNOPSIS:
-#    source parseargs.sh
-#    local -a ARGV;local -A ARGO; parseargs "$@"
+#   source parseargs.sh
 #
 # DESCRIPTION:
-#    source this file and use parseargs() function while variables ARGV and ARVO
-#    are defined as indexed and associative array respectively. The function
-#    will fill the variables with positional arguments and parsed options.
+#   source this file whenever you need to parse arguments of script or
+#   function. Once sourced this file there will be only positional arguments
+#   left and all options will be stored in environment variable OPTIONS. It can
+#   be sourced from both script scope and function scope repeatedly.
+#   Environment variables ARGV and OPTIONS is defined as indexed array and
+#   associative array respectively. ARGV contains positional arguments and
+#   OPTIONS contains options parsed from arguments as described in the preamble,
+#   which refers to the comment block located at the beginning of a script or
+#   immediately above a function definition.
 #
 # DEPENDENCIES:
-#    awk(1) - pattern scanning and processing language
-#    getopt(1) - parse command options (enhanced)
+#   awk(1) - pattern scanning and processing language
+#   getopt(1) - parse command options (enhanced)
 #
 # EXAMPLES:
-#    In bash script following parse arguments and options as described its
-#    preamble comment section.
-#       source parseargs.sh
-#       declare -a ARGV
-#       declare -A ARGO
-#       parseargs "$@"
-#    It can also be used for function, check function foo.bar defined below of
-#    this script for more detail.
+#   source parseargs.sh
+#   for opt in "${!OPTIONS[@]}"
+#   do
+#     echo "  - $opt: ${OPTIONS[$opt]}"
+#   done
+#   for ((i=0;i <= $#; i++))
+#   do
+#     echo "[$i]: ${!i}"
+#   done
+#
+# SIDE EFFECTS:
+#   Environment variables ARGV and OPTIONS is defined after sourced.
 #
 # AUTHOR:
 #    Changbin Park <gh4ck3r@gmail.com>
 
+if [[ -z $(caller 0) ]]; then
+  echo -e "\e[0;31m${BASH_SOURCE[0]##/*} is meant to be sourced\e[0m" >&2;
+  exit 1
+fi
+
+[[ $(type -t err) = function ]] ||
+function err() { echo -e "\e[0;31m" "$@" "\e[0m" >&2; }
+
+[[ $(type -t parseargs) = function ]] ||
 function parseargs {
-  err() { echo -e "\e[0;31m" "$@" "\e[0m" >&2; }
+  if [[ "${BASH_SOURCE[0]}" != "${BASH_SOURCE[1]}" ]]; then
+    echo -e "\e[0;31m${BASH_SOURCE[0]##/*} is meant to be sourced\e[0m" >&2;
+    exit 1
+  fi
 
   local cmd;
   read -r _ cmd _ <<<"$(caller 0)"
+  [[ $cmd == source ]] && read -r _ cmd _ <<<"$(caller 1)"
   local -r cmd
 
-  if [[ ${ARGV@a} != *a* ]] || [[ ${ARGO@a} != *A* ]]; then
+  if [[ ${ARGV@a} != *a* ]] || [[ ${OPTIONS@a} != *A* ]]; then
     if [[ $cmd = main ]]; then
-      err "$cmd: variable ARGV and ARGO should be defined as indexed and associative array"
+      err "$cmd: variable ARGV and OPTIONS should be defined as indexed and associative array"
     else
-      err "${BASH_SOURCE[1]##*/}: variable ARGV and ARGO should be defined as indexed and associative array"
+      err "${BASH_SOURCE[1]##*/}: variable ARGV and OPTIONS should be defined as indexed and associative array"
     fi
     return 22
   fi
-
   local old_opts;
   old_opts=$(set +o | grep nounset); set -u; trap '$old_opts' RETURN
 
   local line file
   if [[ $cmd == main ]]; then
     file=${BASH_SOURCE[1]}
-    line=$(awk '/^\s*#/ {next} {exit} END{print NR}' "$file")
+    [[ $file == "${BASH_SOURCE[0]}" ]] && file=${BASH_SOURCE[2]}
+    line=$(unset POSIXLY_CORRECT; awk '/^\s*#/ {next} {exit} END{print NR}' "$file")
     ARGV[0]=${file##*/}
   else
     read -r _ line file <<<"$(shopt -s extdebug; declare -F "$cmd")"
@@ -59,7 +81,7 @@ function parseargs {
   fi
 
   local option_string;
-  option_string=$(head -n $((line-1)) "$file" |
+  option_string=$(unset POSIXLY_CORRECT; head -n $((line-1)) "$file" |
     tac | awk '
       $1 ~ /^#/ && $2 ~ /^O(ptions?|PTIONS?):?/ {print; exit}
       !NF || $1 != "#" {exit}
@@ -75,9 +97,11 @@ function parseargs {
         found=1
       }
       found {found=0;print""}')
+  local -r option_string;
 
   local -A OPTKEYS;
-  local option soptions="" loptions=""
+  #FIXME: determine whether soptions begin with + or not.
+  local option soptions="+" loptions=""
   while read -rd, option; do
     local opt val
     IFS=: read -r opt val <<<"${option}"
@@ -108,10 +132,11 @@ function parseargs {
     fi
   done <<<"${option_string}"
 
+  [[ $1 == -- ]] && shift
   local opt
   if ! opt=$(getopt --name "${ARGV[0]}" \
-    --longoptions "${loptions%,}" \
     --options "${soptions%,}" \
+    --longoptions "${loptions%,}" \
     -- "$@"); then return 1
   fi
   eval set -- "$opt"
@@ -120,10 +145,10 @@ function parseargs {
     if [[ $1 == -- ]]; then
       shift; break;
     elif [[ -v OPTKEYS[$1:] ]]; then
-      ARGO[${OPTKEYS[$1:]}]=$2;
+      OPTIONS[${OPTKEYS[$1:]}]=$2;
       shift;
     elif [[ -v OPTKEYS[$1] ]]; then
-      ARGO[${OPTKEYS[$1]}]="set";
+      OPTIONS[${OPTKEYS[$1]}]="set";
     else
       err "${ARGV[0]}: unhandled option: '$1'"
     fi
@@ -136,47 +161,8 @@ function parseargs {
   done
 }
 
-[[ -n $(caller 0) ]] && return
-# not sourced from now on
-
-function error() { echo -e "\e[0;31m" "$@" "\e[0m" >&2; }
-
-################################################################################
-# Description
-#  This is a test function to invoke parseargs()
-#
-# Options
-#   -a AVAL, --opta=AVAL  Description of opta
-#   -b BVAL, --optb=BVAL
-#     Description of optb. Sometimes description can be longer than others so it
-#     starts next line.
-#   -c, --optc            short and long set option
-#   -d                    short set option only
-#   -D DVAL               short value option only
-#   --long                long set option only
-#   --LONG=LONGVAL        long value option only
-#
-# Etc
-#  Some additional sections may be following like this. And, it could be write
-#  options that is similar to format of description of Options section like this
-#  -x should be excluded from option processing
-#  --XX should be excluded too
-function foo.bar {
-  local -a ARGV;local -A ARGO; parseargs "$@"
-
-  set -e
-  [[ ${ARGV[0]} == "${FUNCNAME[0]}" ]]
-  [[ ${ARGV[1]} == "Hello world" ]]
-  [[ ${ARGV[2]} == arg2 ]]
-  [[ ${ARGV[3]} == arg3 ]]
-
-  [[ ${ARGO[AVAL]} == hello2 ]]
-  [[ ${ARGO[BVAL]} == world ]]
-  [[ -v ARGO[optc] ]]
-  [[ ${ARGO[DVAL]} == delta ]]
-  [[ -v ARGO[long] ]]
-  set +e
-  echo "foo.bar() test PASS"
-}
-foo.bar -a hello1 --opta hello2 -b world -c -D delta --long "Hello world" arg2 arg3
+declare -a ARGV=()
+declare -A OPTIONS=()
+parseargs -- "$@"
+set -- "${ARGV[@]:1}"
 
